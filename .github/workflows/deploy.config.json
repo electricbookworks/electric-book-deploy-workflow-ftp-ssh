@@ -1,0 +1,34 @@
+{
+  "ftp-ssh": {
+    "configs-comment": "All configs are relative to the _configs folder.",
+    "configs": ["_config.live.yml"],
+    "builds": [
+      {
+        "configs": [],
+        "dir": "electric-book"
+      },
+      {
+        "configs": ["_config.student.yml"],
+        "dir": "test/student"
+      },
+      {
+        "configs": ["_config.teacher.yml"],
+        "dir": "test/teacher"
+      }
+    ],
+    "live":{
+      "type": "ftp", 
+      "host": "host.com",
+      "port": 21,
+      "username": "username",
+      "path": "/"
+    },
+    "staging": {
+      "type": "ssh", 
+      "host": "host.com",
+      "port": 2222,
+      "username": "username",
+      "path": "~/public_html/host.com/staging/"
+    }
+  }
+}

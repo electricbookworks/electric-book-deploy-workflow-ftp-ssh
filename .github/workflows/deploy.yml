@@ -1,0 +1,252 @@
+name: Electric Book Deploy Workflow FTP and SSH
+
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: 'Path to deploy configuration file'
+        required: false
+        default: '.github/workflows/deploy.config.json'
+        type: string
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        default: '22'
+        type: string
+      ruby-version:
+        description: 'Ruby version to use'
+        required: false
+        default: '3.2'
+        type: string
+
+jobs:
+  pre-check:
+    runs-on: ubuntu-latest
+    outputs:
+      skip_book_server: ${{ steps.load_config.outputs.skip_book_server }}
+      should_build: ${{ steps.check_builds.outputs.should_build }}
+      should_deploy: ${{ steps.check_branch.outputs.should_deploy }}
+      deploy_configs: ${{ steps.load_config.outputs.deploy_configs }}
+      build_dirs: ${{ steps.load_config.outputs.build_dirs }}
+      build_configs: ${{ steps.load_config.outputs.build_configs }}
+      target_branch: ${{ steps.check_branch.outputs.target_branch }}
+
+    steps:
+    - name: Checkout config file
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: ${{ inputs.config-file }}
+        fetch-depth: 1
+
+    - name: Load deployment configuration
+      id: load_config
+      run: |
+        CONFIG_FILE="${{ inputs.config-file }}"
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "❌ ERROR: $CONFIG_FILE file not found"
+          exit 1
+        fi
+        
+        FTP_SSH_EXISTS=$(jq -r 'has("ftp-ssh")' "$CONFIG_FILE")
+        if [[ "${FTP_SSH_EXISTS}" != "true" ]]; then
+          echo "📚 No ftp-ssh configuration found, skipping deployment."
+          echo "skip_book_server=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        DEPLOY_CONFIGS=$(jq -r '.["ftp-ssh"].configs | join(",")' "$CONFIG_FILE")
+        
+        # Get builds count first to determine how to handle parsing
+        BUILDS_COUNT=$(jq -r '.["ftp-ssh"].builds | length' "$CONFIG_FILE")
+        
+        if [[ $BUILDS_COUNT -eq 1 ]]; then
+          # Single build - handle empty dir case specially
+          BUILD_DIR=$(jq -r '.["ftp-ssh"].builds[0].dir' "$CONFIG_FILE")
+          BUILD_CONFIG=$(jq -r '.["ftp-ssh"].builds[0].configs | if length > 0 then join(",") else "" end' "$CONFIG_FILE")
+          BUILD_DIRS="${BUILD_DIR}"
+          BUILD_CONFIGS="${BUILD_CONFIG}"
+        else
+          # Multiple builds - use array joining
+          BUILD_DIRS=$(jq -r '.["ftp-ssh"].builds | map(.dir) | join(",")' "$CONFIG_FILE")
+          BUILD_CONFIGS=$(jq -r '.["ftp-ssh"].builds | map(.configs | if length > 0 then join(",") else "" end) | join(";")' "$CONFIG_FILE")
+        fi
+        
+        echo "deploy_configs=${DEPLOY_CONFIGS}" >> $GITHUB_OUTPUT
+        echo "build_dirs=${BUILD_DIRS}" >> $GITHUB_OUTPUT
+        echo "build_configs=${BUILD_CONFIGS}" >> $GITHUB_OUTPUT
+        echo "skip_book_server=false" >> $GITHUB_OUTPUT
+
+    - name: Check for builds
+      id: check_builds
+      if: steps.load_config.outputs.skip_book_server == 'false'
+      run: |
+        BUILD_COUNT=$(jq -r '.["ftp-ssh"].builds | length' "${{ inputs.config-file }}")
+        if [[ "${BUILD_COUNT}" -eq 0 ]]; then
+          echo "🧱 No builds configured, skipping deployment."
+          echo "should_build=false" >> $GITHUB_OUTPUT
+        else
+          echo "should_build=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check if branch is allowed for deployment
+      id: check_branch
+      if: steps.check_builds.outputs.should_build == 'true'
+      run: |
+        CURRENT_BRANCH="${{ github.ref_name }}"
+        if [ "$CURRENT_BRANCH" != "live" ] && [ "$CURRENT_BRANCH" != "staging" ]; then
+          echo "❌ Branch '${CURRENT_BRANCH}' is not 'live' or 'staging', skipping deployment."
+          echo "should_deploy=false" >> $GITHUB_OUTPUT
+        else
+          echo "✅ Branch '${CURRENT_BRANCH}' is allowed for deployment."
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+          echo "target_branch=${CURRENT_BRANCH}" >> $GITHUB_OUTPUT
+        fi
+
+  deploy-to-web-server:
+    needs: pre-check
+    if: needs.pre-check.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout source repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: 'npm'
+
+    - name: Setup Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ inputs.ruby-version }}
+        bundler-cache: true
+
+    - name: Install dependencies
+      run: npm run setup
+
+    - name: Build project
+      run: |
+        BUILD_DIRS_RAW="${{ needs.pre-check.outputs.build_dirs }}"
+        BUILD_CONFIGS_RAW="${{ needs.pre-check.outputs.build_configs }}"
+        
+        echo "Debug: Raw build_dirs: '${BUILD_DIRS_RAW}'"
+        echo "Debug: Raw build_configs: '${BUILD_CONFIGS_RAW}'"
+        
+        # Handle single build case (no commas or semicolons)
+        if [[ "${BUILD_DIRS_RAW}" != *","* ]]; then
+          DIRS=("${BUILD_DIRS_RAW}")
+          CONFIGS_GROUPS=("${BUILD_CONFIGS_RAW}")
+        else
+          IFS=',' read -ra DIRS <<< "${BUILD_DIRS_RAW}"
+          IFS=';' read -ra CONFIGS_GROUPS <<< "${BUILD_CONFIGS_RAW}"
+        fi
+        
+        echo "Debug: DIRS array: [${DIRS[*]}]"
+        echo "Debug: CONFIGS_GROUPS array: [${CONFIGS_GROUPS[*]}]"
+        echo "Debug: DIRS length: ${#DIRS[@]}"
+        echo "Debug: CONFIGS_GROUPS length: ${#CONFIGS_GROUPS[@]}"
+        
+        if [[ ${#DIRS[@]} -ne ${#CONFIGS_GROUPS[@]} ]]; then
+          echo "❌ ERROR: Mismatch between build directories and configs."
+          exit 1
+        fi
+        
+        mkdir -p _build_staging
+        
+        for i in "${!DIRS[@]}"; do
+          DIR_NAME="${DIRS[$i]}"
+          CONFIG_GROUP="${CONFIGS_GROUPS[$i]// /}"
+          
+          # Treat empty dir as root
+          if [[ -z "${DIR_NAME}" ]]; then
+            BASEURL=""
+            SITE_SOURCE="_site"
+            STAGING_TARGET="_build_staging"
+          else
+            BASEURL="/${DIR_NAME}"
+            SITE_SOURCE="_site/${DIR_NAME}"
+            STAGING_TARGET="_build_staging/${DIR_NAME}"
+          fi
+          
+          if [[ -n "${{ needs.pre-check.outputs.deploy_configs }}" && -n "${CONFIG_GROUP}" ]]; then
+            FULL_CONFIGS="${{ needs.pre-check.outputs.deploy_configs }},_configs/${CONFIG_GROUP}"
+          elif [[ -n "${CONFIG_GROUP}" ]]; then
+            FULL_CONFIGS="_configs/${CONFIG_GROUP}"
+          else
+            FULL_CONFIGS="${{ needs.pre-check.outputs.deploy_configs }}"
+          fi
+          
+          npm run eb -- output --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true
+          
+          if [[ -n "${DIR_NAME}" ]]; then
+            mkdir -p "${STAGING_TARGET}"
+          fi
+          cp -r "${SITE_SOURCE}"/* "${STAGING_TARGET}/"
+        done
+
+    - name: Load deployment configuration
+      id: load_deploy_config
+      run: |
+        CONFIG_FILE="${{ inputs.config-file }}"
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        
+        DEPLOY_TYPE=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.type" "$CONFIG_FILE")
+        DEPLOY_HOST=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.host" "$CONFIG_FILE")
+        DEPLOY_PORT=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.port" "$CONFIG_FILE")
+        DEPLOY_USERNAME=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.username" "$CONFIG_FILE")
+        DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.path" "$CONFIG_FILE")
+        
+        echo "deploy_type=${DEPLOY_TYPE}" >> $GITHUB_OUTPUT
+        echo "deploy_host=${DEPLOY_HOST}" >> $GITHUB_OUTPUT
+        echo "deploy_port=${DEPLOY_PORT}" >> $GITHUB_OUTPUT
+        echo "deploy_username=${DEPLOY_USERNAME}" >> $GITHUB_OUTPUT
+        echo "deploy_path=${DEPLOY_PATH}" >> $GITHUB_OUTPUT
+
+    - name: Deploy via FTP
+      if: steps.load_deploy_config.outputs.deploy_type == 'ftp'
+      run: |
+        # Install lftp for advanced FTP mirroring with delete support
+        sudo apt-get update && sudo apt-get install -y lftp
+        
+        # Set variables from deployment config
+        FTP_SERVER="${{ steps.load_deploy_config.outputs.deploy_host }}"
+        FTP_PORT="${{ steps.load_deploy_config.outputs.deploy_port }}"
+        FTP_USER="${{ steps.load_deploy_config.outputs.deploy_username }}"
+        FTP_PASSWORD="${{ secrets.DEPLOY_FTP_PASSWORD }}"
+        LOCAL_DIR="_build_staging/"
+        REMOTE_DIR="${{ steps.load_deploy_config.outputs.deploy_path }}"
+        
+        # Use lftp to mirror with delete (removes orphaned files after sync)
+        lftp -c "
+          set ssl:verify-certificate yes;
+          set ftp:sync-mode false;
+          open -u '$FTP_USER','$FTP_PASSWORD' -p '$FTP_PORT' '$FTP_SERVER';
+          mirror -Rv --delete --exclude-glob '.git*' --exclude-glob 'node_modules' '$LOCAL_DIR' '$REMOTE_DIR';
+          quit
+        "
+
+    - name: Deploy via SSH/SFTP
+      if: steps.load_deploy_config.outputs.deploy_type == 'ssh'
+      uses: burnett01/rsync-deployments@6.0.0
+      with:
+        switches: -avzr --delete
+        path: _build_staging/
+        remote_path: ${{ steps.load_deploy_config.outputs.deploy_path }}
+        remote_host: ${{ steps.load_deploy_config.outputs.deploy_host }}
+        remote_port: ${{ steps.load_deploy_config.outputs.deploy_port }}
+        remote_user: ${{ steps.load_deploy_config.outputs.deploy_username }}
+        remote_key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
+    - name: Deployment Summary
+      run: |
+        echo "✅ Successfully deployed via ${{ steps.load_deploy_config.outputs.deploy_type }}"
+        echo "🌐 Host: ${{ steps.load_deploy_config.outputs.deploy_host }}"
+        echo "👤 User: ${{ steps.load_deploy_config.outputs.deploy_username }}"
+        echo "📁 Source branch: ${{ github.ref_name }}"
+        echo "📂 Deployed directories: ${{ needs.pre-check.outputs.build_dirs }}"
+        echo "🔧 Build configs used: ${{ needs.pre-check.outputs.build_configs }}"
+        echo "🔗 Called from: ${{ github.repository }}"
