@@ -30,6 +30,7 @@ jobs:
       build_dirs: ${{ steps.load_config.outputs.build_dirs }}
       build_configs: ${{ steps.load_config.outputs.build_configs }}
       target_branch: ${{ steps.check_branch.outputs.target_branch }}
+      media_repo: ${{ steps.load_config.outputs.media_repo }}
 
     steps:
     - name: Checkout config file
@@ -75,6 +76,10 @@ jobs:
         echo "build_dirs=${BUILD_DIRS}" >> $GITHUB_OUTPUT
         echo "build_configs=${BUILD_CONFIGS}" >> $GITHUB_OUTPUT
         echo "skip_book_server=false" >> $GITHUB_OUTPUT
+        
+        # Check for media configuration
+        MEDIA_REPO=$(jq -r '."ftp-ssh".media.repo // ""' "$CONFIG_FILE")
+        echo "media_repo=${MEDIA_REPO}" >> $GITHUB_OUTPUT
 
     - name: Check for builds
       id: check_builds
@@ -187,6 +192,65 @@ jobs:
           fi
           cp -r "${SITE_SOURCE}"/* "${STAGING_TARGET}/"
         done
+
+    - name: Checkout and sync media repository
+      if: needs.pre-check.outputs.media_repo != ''
+      run: |
+        MEDIA_REPO="${{ needs.pre-check.outputs.media_repo }}"
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        
+        echo "📦 Checking out media repository: ${MEDIA_REPO} on branch ${TARGET_BRANCH}"
+        echo "🔑 Using token: ${{ secrets.ORG_DEPLOY_TOKEN != '' && '[REDACTED]' || '[EMPTY]' }}"
+
+    - name: Checkout media repository
+      if: needs.pre-check.outputs.media_repo != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ needs.pre-check.outputs.media_repo }}
+        ref: ${{ needs.pre-check.outputs.target_branch }}
+        token: ${{ secrets.ORG_DEPLOY_TOKEN }}
+        path: _media_repo
+        fetch-depth: 1
+
+    - name: Fallback to default branch for media repo
+      if: failure() && needs.pre-check.outputs.media_repo != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ needs.pre-check.outputs.media_repo }}
+        token: ${{ secrets.ORG_DEPLOY_TOKEN }}
+        path: _media_repo
+        fetch-depth: 1
+
+    - name: Sync media folders to staging area
+      if: needs.pre-check.outputs.media_repo != ''
+      run: |
+        MEDIA_REPO="${{ needs.pre-check.outputs.media_repo }}"
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        
+        # Sync only root-level folders (not files) to the staging area
+        # Exclude folders starting with '_' or '.'
+        echo "🔄 Syncing media folders to staging area..."
+        
+        for item in _media_repo/*/; do
+          if [ -d "$item" ]; then
+            folder_name=$(basename "$item")
+            # Skip folders starting with '_' or '.'
+            if [[ ! "$folder_name" =~ ^[_\.].*$ ]]; then
+              echo "  Syncing folder: $folder_name"
+              # Create destination folder if it doesn't exist
+              mkdir -p "_build_staging/$folder_name"
+              # Copy recursively without deleting existing files
+              cp -r "$item"* "_build_staging/$folder_name/"
+            else
+              echo "  Skipping folder: $folder_name (starts with '_' or '.')"
+            fi
+          fi
+        done
+        
+        # Clean up the temporary media repo
+        rm -rf _media_repo
+        
+        echo "✅ Media sync completed"
 
     - name: Load deployment configuration
       id: load_deploy_config
