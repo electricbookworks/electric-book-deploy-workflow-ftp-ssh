@@ -195,15 +195,9 @@ jobs:
         TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
         
         DEPLOY_TYPE=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.type" "$CONFIG_FILE")
-        DEPLOY_HOST=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.host" "$CONFIG_FILE")
-        DEPLOY_PORT=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.port" "$CONFIG_FILE")
-        DEPLOY_USERNAME=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.username" "$CONFIG_FILE")
         DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.path" "$CONFIG_FILE")
         
         echo "deploy_type=${DEPLOY_TYPE}" >> $GITHUB_OUTPUT
-        echo "deploy_host=${DEPLOY_HOST}" >> $GITHUB_OUTPUT
-        echo "deploy_port=${DEPLOY_PORT}" >> $GITHUB_OUTPUT
-        echo "deploy_username=${DEPLOY_USERNAME}" >> $GITHUB_OUTPUT
         echo "deploy_path=${DEPLOY_PATH}" >> $GITHUB_OUTPUT
 
     - name: Deploy via FTP
@@ -212,11 +206,19 @@ jobs:
         # Install lftp for advanced FTP mirroring with delete support
         sudo apt-get update && sudo apt-get install -y lftp
         
-        # Set variables from deployment config
-        FTP_SERVER="${{ steps.load_deploy_config.outputs.deploy_host }}"
-        FTP_PORT="${{ steps.load_deploy_config.outputs.deploy_port }}"
-        FTP_USER="${{ steps.load_deploy_config.outputs.deploy_username }}"
-        FTP_PASSWORD="${{ secrets.DEPLOY_FTP_PASSWORD }}"
+        # Set variables from repository secrets and deployment config
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        if [ "$TARGET_BRANCH" = "live" ]; then
+          FTP_SERVER="${{ secrets.DEPLOY_HOST_LIVE }}"
+          FTP_PORT="${{ secrets.DEPLOY_PORT_LIVE }}"
+          FTP_USER="${{ secrets.DEPLOY_USERNAME_LIVE }}"
+          FTP_PASSWORD="${{ secrets.DEPLOY_FTP_PASSWORD }}"
+        else
+          FTP_SERVER="${{ secrets.DEPLOY_HOST_STAGING }}"
+          FTP_PORT="${{ secrets.DEPLOY_PORT_STAGING }}"
+          FTP_USER="${{ secrets.DEPLOY_USERNAME_STAGING }}"
+          FTP_PASSWORD="${{ secrets.DEPLOY_FTP_PASSWORD }}"
+        fi
         LOCAL_DIR="_build_staging/"
         REMOTE_DIR="${{ steps.load_deploy_config.outputs.deploy_path }}"
         
@@ -236,16 +238,25 @@ jobs:
         switches: -avzr --delete
         path: _build_staging/
         remote_path: ${{ steps.load_deploy_config.outputs.deploy_path }}
-        remote_host: ${{ steps.load_deploy_config.outputs.deploy_host }}
-        remote_port: ${{ steps.load_deploy_config.outputs.deploy_port }}
-        remote_user: ${{ steps.load_deploy_config.outputs.deploy_username }}
+        remote_host: ${{ needs.pre-check.outputs.target_branch == 'live' && secrets.DEPLOY_HOST_LIVE || secrets.DEPLOY_HOST_STAGING }}
+        remote_port: ${{ needs.pre-check.outputs.target_branch == 'live' && secrets.DEPLOY_PORT_LIVE || secrets.DEPLOY_PORT_STAGING }}
+        remote_user: ${{ needs.pre-check.outputs.target_branch == 'live' && secrets.DEPLOY_USERNAME_LIVE || secrets.DEPLOY_USERNAME_STAGING }}
         remote_key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
 
     - name: Deployment Summary
       run: |
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        if [ "$TARGET_BRANCH" = "live" ]; then
+          DEPLOY_HOST="${{ secrets.DEPLOY_HOST_LIVE }}"
+          DEPLOY_USER="${{ secrets.DEPLOY_USERNAME_LIVE }}"
+        else
+          DEPLOY_HOST="${{ secrets.DEPLOY_HOST_STAGING }}"
+          DEPLOY_USER="${{ secrets.DEPLOY_USERNAME_STAGING }}"
+        fi
+        
         echo "✅ Successfully deployed via ${{ steps.load_deploy_config.outputs.deploy_type }}"
-        echo "🌐 Host: ${{ steps.load_deploy_config.outputs.deploy_host }}"
-        echo "👤 User: ${{ steps.load_deploy_config.outputs.deploy_username }}"
+        echo "🌐 Host: ${DEPLOY_HOST}"
+        echo "👤 User: ${DEPLOY_USER}"
         echo "📁 Source branch: ${{ github.ref_name }}"
         echo "📂 Deployed directories: ${{ needs.pre-check.outputs.build_dirs }}"
         echo "🔧 Build configs used: ${{ needs.pre-check.outputs.build_configs }}"

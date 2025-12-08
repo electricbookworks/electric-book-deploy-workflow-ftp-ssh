@@ -17,18 +17,12 @@
       }
     ],
     "live":{
-      "type": "ftp", 
-      "host": "host.com",
-      "port": 21,
-      "username": "username",
-      "path": "/"
+      "type": "ftp",
+      "path": ""
     },
     "staging": {
       "type": "ssh", 
-      "host": "host.com",
-      "port": 2222,
-      "username": "username",
-      "path": "~/public_html/host.com/staging/"
+      "path": "public_html"
     }
   }
 }
