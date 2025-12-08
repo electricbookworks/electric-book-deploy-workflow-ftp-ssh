@@ -21,7 +21,7 @@ jobs:
     secrets: inherit
 ```
 
-Replace `{release-version}` with the latest release (e.g. `v1.0.0`), unless you want to use an older version.
+Replace `{release-version}` with the latest release (e.g. `v2.0.0`), unless you want to use an older version.
 
 You can also add optional inputs to customise the Ruby and Node versions, as well as the config file location:
 
@@ -66,18 +66,12 @@ Create `.github/workflows/deploy.config.json`:
       }
     ],
     "live":{
-      "type": "ftp", 
-      "host": "host.com",
-      "port": 21,
-      "username": "username",
-      "path": "/"
+      "type": "ftp",
+      "path": ""
     },
     "staging": {
       "type": "ssh", 
-      "host": "host.com",
-      "port": 2222,
-      "username": "username",
-      "path": "~/public_html/host.com/staging/"
+      "path": "public_html"
     }
   }
 }
@@ -90,3 +84,9 @@ This workflow depends on the follwoing secrets being defined either at the organ
 
 1. `DEPLOY_SSH_PRIVATE_KEY` - the corresponding public key needs to be added to the web server's `authorized_keys`.
 2. `DEPLOY_FTP_PASSWORD` 
+3. `DEPLOY_HOST_LIVE`
+4. `DEPLOY_HOST_STAGING`
+4. `DEPLOY_PORT_LIVE`
+4. `DEPLOY_PORT_STAGING`
+4. `DEPLOY_USERNAME_LIVE`
+4. `DEPLOY_USERNAME_STAGING`
