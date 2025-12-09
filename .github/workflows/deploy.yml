@@ -107,6 +107,45 @@ jobs:
           echo "target_branch=${CURRENT_BRANCH}" >> $GITHUB_OUTPUT
         fi
 
+    - name: Check if deployment configuration exists for branch
+      id: check_deploy_config
+      if: steps.check_branch.outputs.should_deploy == 'true'
+      run: |
+        CONFIG_FILE="${{ inputs.config-file }}"
+        TARGET_BRANCH="${{ steps.check_branch.outputs.target_branch }}"
+        
+        # Check if deployment configuration exists for the target branch
+        DEPLOY_CONFIG_EXISTS=$(jq -r ".\"ftp-ssh\" | has(\"${TARGET_BRANCH}\")" "$CONFIG_FILE")
+        
+        if [[ "${DEPLOY_CONFIG_EXISTS}" != "true" ]]; then
+          echo "❌ ERROR: No deployment configuration found for branch '${TARGET_BRANCH}' in ${CONFIG_FILE}"
+          echo "Expected configuration section: ftp-ssh.${TARGET_BRANCH}"
+          exit 1
+        fi
+        
+        # Validate that required fields exist
+        DEPLOY_TYPE=$(jq -r ".\"ftp-ssh\".\"${TARGET_BRANCH}\".type // \"null\"" "$CONFIG_FILE")
+        DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".\"${TARGET_BRANCH}\".path // \"null\"" "$CONFIG_FILE")
+        
+        if [[ "${DEPLOY_TYPE}" == "null" ]]; then
+          echo "❌ ERROR: Missing 'type' in deployment configuration for branch '${TARGET_BRANCH}'"
+          exit 1
+        fi
+        
+        if [[ "${DEPLOY_PATH}" == "null" ]]; then
+          echo "❌ ERROR: Missing 'path' in deployment configuration for branch '${TARGET_BRANCH}'"
+          exit 1
+        fi
+        
+        if [[ "${DEPLOY_TYPE}" != "ftp" && "${DEPLOY_TYPE}" != "ssh" ]]; then
+          echo "❌ ERROR: Invalid deployment type '${DEPLOY_TYPE}' for branch '${TARGET_BRANCH}'. Must be 'ftp' or 'ssh'"
+          exit 1
+        fi
+        
+        echo "✅ Deployment configuration validated for branch '${TARGET_BRANCH}'"
+        echo "   Type: ${DEPLOY_TYPE}"
+        echo "   Path: ${DEPLOY_PATH}"
+
   deploy-to-web-server:
     needs: pre-check
     if: needs.pre-check.outputs.should_deploy == 'true'
