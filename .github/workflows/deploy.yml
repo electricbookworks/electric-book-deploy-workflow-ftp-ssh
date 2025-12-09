@@ -18,6 +18,16 @@ on:
         required: false
         default: '3.2'
         type: string
+      setup-command:
+        description: 'Command to run for installing dependencies'
+        required: false
+        default: 'npm run setup'
+        type: string
+      build-command:
+        description: 'Command to run for building the project'
+        required: false
+        default: 'npm run eb -- output'
+        type: string
 
 jobs:
   pre-check:
@@ -126,7 +136,7 @@ jobs:
         bundler-cache: true
 
     - name: Install dependencies
-      run: npm run setup
+      run: ${{ inputs.setup-command }}
 
     - name: Build project
       run: |
@@ -180,7 +190,7 @@ jobs:
             FULL_CONFIGS="${{ needs.pre-check.outputs.deploy_configs }}"
           fi
           
-          npm run eb -- output --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true
+          ${{ inputs.build-command }} --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true
           
           if [[ -n "${DIR_NAME}" ]]; then
             mkdir -p "${STAGING_TARGET}"

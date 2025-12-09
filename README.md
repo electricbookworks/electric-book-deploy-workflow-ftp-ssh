@@ -23,7 +23,7 @@ jobs:
 
 Replace `{release-version}` with the latest release (e.g. `v2.0.0`), unless you want to use an older version.
 
-You can also add optional inputs to customise the Ruby and Node versions, as well as the config file location:
+You can also add the following optional inputs:
 
 ```yaml
 name: Deploy to web server with FTP or SSH
@@ -40,6 +40,8 @@ jobs:
       config-file: '.github/workflows/deploy.config.json' # optional - defaults to '.github/workflows/deploy.config.json'
       node-version: '22' # optional - defaults to 22
       ruby-version: '3.2' # optional - defaults to 3.2
+      setup-command: 'npm run setup' # optional - defaults to 'npm run setup'
+      build-command: 'npm run eb -- output' # optional - defaults to 'npm run eb -- output'
 ```
 
 ### 2. Create your deployment configuration
