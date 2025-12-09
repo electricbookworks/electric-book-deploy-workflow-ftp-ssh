@@ -21,7 +21,7 @@ on:
 
 jobs:
   pre-check:
-    runs-on: ubuntu-latest
+    runs-on: Linux-4core-16gb-ram-150gb-sso
     outputs:
       skip_book_server: ${{ steps.load_config.outputs.skip_book_server }}
       should_build: ${{ steps.check_builds.outputs.should_build }}
