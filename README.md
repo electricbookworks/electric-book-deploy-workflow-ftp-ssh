@@ -70,11 +70,13 @@ Create `.github/workflows/deploy.config.json`:
     "path-comment": "The contents of the paths defined below will be completely replaced on the server by the builds output. So make sure the path is dedicated to this deployment.",
     "live":{
       "type": "ftp",
+      "web-root": "public_html",
       "path": ""
     },
     "staging": {
-      "type": "ssh", 
-      "path": "public_html"
+      "type": "ssh",
+      "web-root": "public_html",
+      "path": ""
     }
   }
 }

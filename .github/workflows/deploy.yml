@@ -167,19 +167,39 @@ jobs:
         
         mkdir -p _build_staging
         
+        # Get deployment configuration once
+        CONFIG_FILE="${{ inputs.config-file }}"
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.path" "$CONFIG_FILE")
+        WEB_ROOT=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.\"web-root\"" "$CONFIG_FILE")
+        
         for i in "${!DIRS[@]}"; do
           DIR_NAME="${DIRS[$i]}"
           CONFIG_GROUP="${CONFIGS_GROUPS[$i]// /}"
           
-          # Treat empty dir as root
-          if [[ -z "${DIR_NAME}" ]]; then
-            BASEURL=""
-            SITE_SOURCE="_site"
-            STAGING_TARGET="_build_staging"
-          else
+          # Calculate baseurl: deployment path + build dir
+          if [[ -n "${DEPLOY_PATH}" && -n "${DIR_NAME}" ]]; then
+            BASEURL="/${DEPLOY_PATH}/${DIR_NAME}"
+          elif [[ -n "${DEPLOY_PATH}" ]]; then
+            BASEURL="/${DEPLOY_PATH}"
+          elif [[ -n "${DIR_NAME}" ]]; then
             BASEURL="/${DIR_NAME}"
-            SITE_SOURCE="_site/${DIR_NAME}"
+          else
+            BASEURL=""
+          fi
+          
+          # Set Jekyll output source path
+          if [[ -z "${BASEURL}" ]]; then
+            SITE_SOURCE="_site"
+          else
+            SITE_SOURCE="_site${BASEURL}"
+          fi
+          
+          # Set staging target path
+          if [[ -n "${DIR_NAME}" ]]; then
             STAGING_TARGET="_build_staging/${DIR_NAME}"
+          else
+            STAGING_TARGET="_build_staging"
           fi
           
           if [[ -n "${{ needs.pre-check.outputs.deploy_configs }}" && -n "${CONFIG_GROUP}" ]]; then
@@ -192,9 +212,12 @@ jobs:
           
           ${{ inputs.build-command }} --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true
           
-          if [[ -n "${DIR_NAME}" ]]; then
+          # Create target directory if needed
+          if [[ "${STAGING_TARGET}" != "_build_staging" ]]; then
             mkdir -p "${STAGING_TARGET}"
           fi
+          
+          # Copy files to staging
           cp -r "${SITE_SOURCE}"/* "${STAGING_TARGET}/"
         done
 
@@ -206,9 +229,11 @@ jobs:
         
         DEPLOY_TYPE=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.type" "$CONFIG_FILE")
         DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.path" "$CONFIG_FILE")
+        WEB_ROOT=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.\"web-root\"" "$CONFIG_FILE")
         
         echo "deploy_type=${DEPLOY_TYPE}" >> $GITHUB_OUTPUT
         echo "deploy_path=${DEPLOY_PATH}" >> $GITHUB_OUTPUT
+        echo "web_root=${WEB_ROOT}" >> $GITHUB_OUTPUT
 
     - name: Deploy via FTP
       if: steps.load_deploy_config.outputs.deploy_type == 'ftp'
@@ -230,7 +255,20 @@ jobs:
           FTP_PASSWORD="${{ secrets.DEPLOY_FTP_PASSWORD }}"
         fi
         LOCAL_DIR="_build_staging/"
-        REMOTE_DIR="${{ steps.load_deploy_config.outputs.deploy_path }}"
+        
+        # Calculate remote directory: web-root + path
+        WEB_ROOT="${{ steps.load_deploy_config.outputs.web_root }}"
+        DEPLOY_PATH="${{ steps.load_deploy_config.outputs.deploy_path }}"
+        
+        if [[ -n "${WEB_ROOT}" && -n "${DEPLOY_PATH}" ]]; then
+          REMOTE_DIR="${WEB_ROOT}/${DEPLOY_PATH}"
+        elif [[ -n "${WEB_ROOT}" ]]; then
+          REMOTE_DIR="${WEB_ROOT}"
+        elif [[ -n "${DEPLOY_PATH}" ]]; then
+          REMOTE_DIR="${DEPLOY_PATH}"
+        else
+          REMOTE_DIR=""
+        fi
         
         # Use lftp to mirror with delete (removes orphaned files after sync)
         lftp -c "
@@ -244,10 +282,13 @@ jobs:
     - name: Deploy via SSH/SFTP
       if: steps.load_deploy_config.outputs.deploy_type == 'ssh'
       uses: burnett01/rsync-deployments@6.0.0
+      env:
+        WEB_ROOT: ${{ steps.load_deploy_config.outputs.web_root }}
+        DEPLOY_PATH: ${{ steps.load_deploy_config.outputs.deploy_path }}
       with:
         switches: -avzr --delete
         path: _build_staging/
-        remote_path: ${{ steps.load_deploy_config.outputs.deploy_path }}
+        remote_path: ${{ env.WEB_ROOT != 'null' && env.DEPLOY_PATH != 'null' && format('{0}/{1}', env.WEB_ROOT, env.DEPLOY_PATH) || env.WEB_ROOT != 'null' && env.WEB_ROOT || env.DEPLOY_PATH != 'null' && env.DEPLOY_PATH || '' }}
         remote_host: ${{ needs.pre-check.outputs.target_branch == 'live' && secrets.DEPLOY_HOST_LIVE || secrets.DEPLOY_HOST_STAGING }}
         remote_port: ${{ needs.pre-check.outputs.target_branch == 'live' && secrets.DEPLOY_PORT_LIVE || secrets.DEPLOY_PORT_STAGING }}
         remote_user: ${{ needs.pre-check.outputs.target_branch == 'live' && secrets.DEPLOY_USERNAME_LIVE || secrets.DEPLOY_USERNAME_STAGING }}
