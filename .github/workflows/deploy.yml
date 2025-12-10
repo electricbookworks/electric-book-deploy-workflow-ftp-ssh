@@ -225,7 +225,9 @@ jobs:
         echo "🔑 Using token: ${{ secrets.ORG_DEPLOY_TOKEN != '' && '[REDACTED]' || '[EMPTY]' }}"
 
     - name: Checkout media repository
+      id: checkout_media
       if: needs.pre-check.outputs.media_repo != ''
+      continue-on-error: true
       uses: actions/checkout@v4
       with:
         repository: ${{ needs.pre-check.outputs.media_repo }}
@@ -235,7 +237,7 @@ jobs:
         fetch-depth: 1
 
     - name: Fallback to default branch for media repo
-      if: failure() && needs.pre-check.outputs.media_repo != ''
+      if: steps.checkout_media.outcome == 'failure' && needs.pre-check.outputs.media_repo != ''
       uses: actions/checkout@v4
       with:
         repository: ${{ needs.pre-check.outputs.media_repo }}
@@ -244,7 +246,7 @@ jobs:
         fetch-depth: 1
 
     - name: Sync media folders to staging area
-      if: needs.pre-check.outputs.media_repo != ''
+      if: needs.pre-check.outputs.media_repo != '' && (steps.checkout_media.outcome == 'success' || steps.checkout_media.outcome == 'failure')
       run: |
         MEDIA_REPO="${{ needs.pre-check.outputs.media_repo }}"
         TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
