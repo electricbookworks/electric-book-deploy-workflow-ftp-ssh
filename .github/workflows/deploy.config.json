@@ -28,7 +28,10 @@
       "path": ""
     },
     "media": {
-      "repo": "owner-name/repo-name"
+      "repo": "owner-name/repo-name",
+      "dirs": [
+        "assets/images/web"
+      ]
     }
   }
 }

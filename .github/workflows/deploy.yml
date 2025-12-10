@@ -40,6 +40,8 @@ jobs:
       build_dirs: ${{ steps.load_config.outputs.build_dirs }}
       build_configs: ${{ steps.load_config.outputs.build_configs }}
       target_branch: ${{ steps.check_branch.outputs.target_branch }}
+      media_repo: ${{ steps.load_config.outputs.media_repo }}
+      media_dirs: ${{ steps.load_config.outputs.media_dirs }}
 
     steps:
     - name: Checkout config file
@@ -85,6 +87,12 @@ jobs:
         echo "build_dirs=${BUILD_DIRS}" >> $GITHUB_OUTPUT
         echo "build_configs=${BUILD_CONFIGS}" >> $GITHUB_OUTPUT
         echo "skip_book_server=false" >> $GITHUB_OUTPUT
+        
+        # Check for media configuration
+        MEDIA_REPO=$(jq -r '."ftp-ssh".media.repo // ""' "$CONFIG_FILE")
+        MEDIA_DIRS=$(jq -r '."ftp-ssh".media.dirs // [] | join(",")' "$CONFIG_FILE")
+        echo "media_repo=${MEDIA_REPO}" >> $GITHUB_OUTPUT
+        echo "media_dirs=${MEDIA_DIRS}" >> $GITHUB_OUTPUT
 
     - name: Check for builds
       id: check_builds
@@ -240,24 +248,36 @@ jobs:
       run: |
         MEDIA_REPO="${{ needs.pre-check.outputs.media_repo }}"
         TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
-        # Sync only root-level folders (not files) to the staging area
-        # Exclude folders starting with '_' or '.'
+        MEDIA_DIRS_RAW="${{ needs.pre-check.outputs.media_dirs }}"
+        
         echo "🔄 Syncing media folders to staging area..."
-        for item in _media_repo/*/; do
-          if [ -d "$item" ]; then
-            folder_name=$(basename "$item")
-            # Skip folders starting with '_' or '.'
-            if [[ ! "$folder_name" =~ ^[_\.].*$ ]]; then
-              echo "  Syncing folder: $folder_name"
-              # Create destination folder if it doesn't exist
-              mkdir -p "_build_staging/$folder_name"
-              # Copy recursively without deleting existing files
-              cp -r "$item"* "_build_staging/$folder_name/"
+        echo "Media dirs configured: ${MEDIA_DIRS_RAW}"
+        
+        # Handle media dirs configuration
+        if [[ -n "${MEDIA_DIRS_RAW}" ]]; then
+          # Parse comma-separated dirs
+          IFS=',' read -ra MEDIA_DIRS <<< "${MEDIA_DIRS_RAW}"
+          
+          for media_dir in "${MEDIA_DIRS[@]}"; do
+            # Remove leading/trailing whitespace
+            media_dir=$(echo "$media_dir" | xargs)
+            
+            if [[ -d "_media_repo/$media_dir" ]]; then
+              echo "  Syncing directory: $media_dir"
+              
+              # Create destination directory structure
+              mkdir -p "_build_staging/$(dirname "$media_dir")"
+              
+              # Copy the directory contents
+              cp -r "_media_repo/$media_dir" "_build_staging/$(dirname "$media_dir")/"
             else
-              echo "  Skipping folder: $folder_name (starts with '_' or '.')"
+              echo "  ⚠️  Directory not found in media repo: $media_dir"
             fi
-          fi
-        done
+          done
+        else
+          echo "  📝 No media directories configured in 'dirs' array"
+        fi
+        
         # Clean up the temporary media repo
         rm -rf _media_repo
         echo "✅ Media sync completed"
