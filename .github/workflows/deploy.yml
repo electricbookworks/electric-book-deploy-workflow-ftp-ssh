@@ -133,20 +133,40 @@ jobs:
       - name: Install dependencies
         run: ${{ inputs.setup-command }}
 
-      - name: Checkout media repository
+      - name: Setup media repository
         if: needs.pre-check.outputs.media_repo != ''
-        id: checkout_media
-        continue-on-error: true
+        id: setup_media
+        run: |
+          MEDIA_REPO="${{ needs.pre-check.outputs.media_repo }}"
+          TARGET_BRANCH="${{ env.TARGET_BRANCH }}"
+          
+          echo "🔍 Checking media repository: $MEDIA_REPO"
+          echo "🌿 Target branch: $TARGET_BRANCH"
+          
+          # Check if the target branch exists in the media repository
+          if git ls-remote --heads https://${{ secrets.ORG_DEPLOY_TOKEN }}@github.com/$MEDIA_REPO.git $TARGET_BRANCH | grep -q $TARGET_BRANCH; then
+            echo "✅ Branch '$TARGET_BRANCH' exists in media repository"
+            echo "checkout_ref=$TARGET_BRANCH" >> $GITHUB_OUTPUT
+            echo "checkout_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Branch '$TARGET_BRANCH' not found in media repository"
+            echo "📋 Will use default branch instead"
+            echo "checkout_ref=" >> $GITHUB_OUTPUT
+            echo "checkout_success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout media repository
+        if: needs.pre-check.outputs.media_repo != '' && steps.setup_media.outputs.checkout_success == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ needs.pre-check.outputs.media_repo }}
-          ref: ${{ env.TARGET_BRANCH }}
+          ref: ${{ steps.setup_media.outputs.checkout_ref }}
           token: ${{ secrets.ORG_DEPLOY_TOKEN }}
           path: _media_repo
           fetch-depth: 1
 
-      - name: Fallback media checkout (Default branch)
-        if: needs.pre-check.outputs.media_repo != '' && steps.checkout_media.outcome == 'failure'
+      - name: Checkout media repository (default branch)
+        if: needs.pre-check.outputs.media_repo != '' && steps.setup_media.outputs.checkout_success == 'false'
         uses: actions/checkout@v4
         with:
           repository: ${{ needs.pre-check.outputs.media_repo }}
