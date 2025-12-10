@@ -254,29 +254,109 @@ jobs:
           
           LOCAL_DIR="_build_staging/"
           REMOTE_DIR="${{ steps.build_project.outputs.remote_dir }}"
+          CONFIG_FILE="${{ inputs.config-file }}"
+          BUILDS_JSON='${{ needs.pre-check.outputs.builds_json }}'
           
           echo "🚀 Deploying via FTP to: $REMOTE_DIR"
 
-          lftp -c "
-            set ssl:verify-certificate yes;
-            set ftp:sync-mode false;
-            open -u '$DEPLOY_USER','$DEPLOY_PASS' -p '$DEPLOY_PORT' '$DEPLOY_HOST';
-            mirror -Rv --delete --exclude-glob '.git*' --exclude-glob 'node_modules' '$LOCAL_DIR' '$REMOTE_DIR';
-            quit
-          "
+          # Check if any builds have specific directories
+          HAS_DIRS=$(echo "$BUILDS_JSON" | jq -r 'map(select(.dir != "")) | length > 0')
+          
+          if [[ "$HAS_DIRS" == "true" ]]; then
+            echo "📁 Deploying per-directory to avoid root-level deletions"
+            
+            # Deploy each build directory individually
+            echo "$BUILDS_JSON" | jq -c '.[]' | while read -r build_item; do
+              DIR_NAME=$(echo "$build_item" | jq -r '.dir')
+              
+              if [[ -n "$DIR_NAME" && -d "${LOCAL_DIR}${DIR_NAME}" ]]; then
+                echo "   Syncing directory: $DIR_NAME"
+                
+                lftp -c "
+                  set ssl:verify-certificate yes;
+                  set ftp:sync-mode false;
+                  open -u '$DEPLOY_USER','$DEPLOY_PASS' -p '$DEPLOY_PORT' '$DEPLOY_HOST';
+                  mirror -Rv --delete --exclude-glob '.git*' --exclude-glob 'node_modules' '${LOCAL_DIR}${DIR_NAME}/' '${REMOTE_DIR}/${DIR_NAME}';
+                  quit
+                "
+              fi
+            done
+            
+            # Also sync any root-level files (without --delete to preserve other directories)
+            if [[ -n "$(find "$LOCAL_DIR" -maxdepth 1 -type f)" ]]; then
+              echo "   Syncing root-level files"
+              lftp -c "
+                set ssl:verify-certificate yes;
+                set ftp:sync-mode false;
+                open -u '$DEPLOY_USER','$DEPLOY_PASS' -p '$DEPLOY_PORT' '$DEPLOY_HOST';
+                mirror -Rv --exclude-glob '.git*' --exclude-glob 'node_modules' --include-glob='*.*' --exclude-glob='*/' '$LOCAL_DIR' '$REMOTE_DIR';
+                quit
+              "
+            fi
+          else
+            echo "📦 Deploying entire directory (no specific build dirs)"
+            lftp -c "
+              set ssl:verify-certificate yes;
+              set ftp:sync-mode false;
+              open -u '$DEPLOY_USER','$DEPLOY_PASS' -p '$DEPLOY_PORT' '$DEPLOY_HOST';
+              mirror -Rv --delete --exclude-glob '.git*' --exclude-glob 'node_modules' '$LOCAL_DIR' '$REMOTE_DIR';
+              quit
+            "
+          fi
 
       - name: Deploy via SSH/SFTP
         if: steps.build_project.outputs.deploy_type == 'ssh'
-        uses: burnett01/rsync-deployments@6.0.0
-        with:
-          switches: -avzr --delete
-          path: _build_staging/
-          # We use the pre-calculated remote_dir from the build step
-          remote_path: ${{ steps.build_project.outputs.remote_dir }}
-          remote_host: ${{ env.DEPLOY_HOST }}
-          remote_port: ${{ env.DEPLOY_PORT }}
-          remote_user: ${{ env.DEPLOY_USER }}
-          remote_key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          # Setup SSH key
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+          LOCAL_DIR="_build_staging/"
+          REMOTE_DIR="${{ steps.build_project.outputs.remote_dir }}"
+          CONFIG_FILE="${{ inputs.config-file }}"
+          BUILDS_JSON='${{ needs.pre-check.outputs.builds_json }}'
+          
+          echo "🚀 Deploying via SSH to: $REMOTE_DIR"
+          
+          # Check if any builds have specific directories
+          HAS_DIRS=$(echo "$BUILDS_JSON" | jq -r 'map(select(.dir != "")) | length > 0')
+          
+          if [[ "$HAS_DIRS" == "true" ]]; then
+            echo "📁 Deploying per-directory to avoid root-level deletions"
+            
+            # Deploy each build directory individually
+            echo "$BUILDS_JSON" | jq -c '.[]' | while read -r build_item; do
+              DIR_NAME=$(echo "$build_item" | jq -r '.dir')
+              
+              if [[ -n "$DIR_NAME" && -d "${LOCAL_DIR}${DIR_NAME}" ]]; then
+                echo "   Syncing directory: $DIR_NAME"
+                rsync -avzr --delete \
+                  -e "ssh -i ~/.ssh/deploy_key -p ${{ env.DEPLOY_PORT }} -o StrictHostKeyChecking=no" \
+                  "${LOCAL_DIR}${DIR_NAME}/" \
+                  "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${REMOTE_DIR}/${DIR_NAME}/"
+              fi
+            done
+            
+            # Also sync any root-level files (without --delete to preserve other directories)
+            if [[ -n "$(find "$LOCAL_DIR" -maxdepth 1 -type f)" ]]; then
+              echo "   Syncing root-level files"
+              rsync -avzr \
+                -e "ssh -i ~/.ssh/deploy_key -p ${{ env.DEPLOY_PORT }} -o StrictHostKeyChecking=no" \
+                --include='*.*' --exclude='*/' \
+                "${LOCAL_DIR}" \
+                "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${REMOTE_DIR}/"
+            fi
+          else
+            echo "📦 Deploying entire directory (no specific build dirs)"
+            rsync -avzr --delete \
+              -e "ssh -i ~/.ssh/deploy_key -p ${{ env.DEPLOY_PORT }} -o StrictHostKeyChecking=no" \
+              "${LOCAL_DIR}" \
+              "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${REMOTE_DIR}/"
+          fi
+          
+          # Clean up SSH key
+          rm -f ~/.ssh/deploy_key
 
       - name: Deployment Summary
         run: |
