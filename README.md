@@ -77,10 +77,15 @@ Create `.github/workflows/deploy.config.json`:
       "type": "ssh",
       "web-root": "public_html",
       "path": ""
+    },
+    "media": {
+      "repo": "owner-name/repo-name",
+      "dirs": [
+        "assets/images/web"
+      ]
     }
   }
 }
-
 ```
 
 ## Configuring GitHub Secrets
