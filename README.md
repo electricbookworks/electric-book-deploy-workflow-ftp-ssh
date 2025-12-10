@@ -41,7 +41,7 @@ jobs:
       node-version: '22' # optional - defaults to 22
       ruby-version: '3.2' # optional - defaults to 3.2
       setup-command: 'npm run setup' # optional - defaults to 'npm run setup'
-      build-command: 'npm run eb -- output' # optional - defaults to 'npm run eb -- output'
+      build-command: 'npm run eb -- output --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true' # optional - defaults to 'npm run eb -- output --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true'
 ```
 
 ### 2. Create your deployment configuration
