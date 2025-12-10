@@ -26,6 +26,9 @@
       "type": "ssh",
       "web-root": "public_html",
       "path": ""
+    },
+    "media": {
+      "repo": "owner-name/repo-name"
     }
   }
 }

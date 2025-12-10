@@ -139,13 +139,12 @@ jobs:
       run: ${{ inputs.setup-command }}
 
     - name: Build project
+
       run: |
         BUILD_DIRS_RAW="${{ needs.pre-check.outputs.build_dirs }}"
         BUILD_CONFIGS_RAW="${{ needs.pre-check.outputs.build_configs }}"
-        
         echo "Debug: Raw build_dirs: '${BUILD_DIRS_RAW}'"
         echo "Debug: Raw build_configs: '${BUILD_CONFIGS_RAW}'"
-        
         # Handle single build case (no commas or semicolons)
         if [[ "${BUILD_DIRS_RAW}" != *","* ]]; then
           DIRS=("${BUILD_DIRS_RAW}")
@@ -154,29 +153,23 @@ jobs:
           IFS=',' read -ra DIRS <<< "${BUILD_DIRS_RAW}"
           IFS=';' read -ra CONFIGS_GROUPS <<< "${BUILD_CONFIGS_RAW}"
         fi
-        
         echo "Debug: DIRS array: [${DIRS[*]}]"
         echo "Debug: CONFIGS_GROUPS array: [${CONFIGS_GROUPS[*]}]"
         echo "Debug: DIRS length: ${#DIRS[@]}"
         echo "Debug: CONFIGS_GROUPS length: ${#CONFIGS_GROUPS[@]}"
-        
         if [[ ${#DIRS[@]} -ne ${#CONFIGS_GROUPS[@]} ]]; then
           echo "❌ ERROR: Mismatch between build directories and configs."
           exit 1
         fi
-        
         mkdir -p _build_staging
-        
         # Get deployment configuration once
         CONFIG_FILE="${{ inputs.config-file }}"
         TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
         DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.path" "$CONFIG_FILE")
         WEB_ROOT=$(jq -r ".\"ftp-ssh\".${TARGET_BRANCH}.\"web-root\"" "$CONFIG_FILE")
-        
         for i in "${!DIRS[@]}"; do
           DIR_NAME="${DIRS[$i]}"
           CONFIG_GROUP="${CONFIGS_GROUPS[$i]// /}"
-          
           # Calculate baseurl: deployment path + build dir
           if [[ -n "${DEPLOY_PATH}" && -n "${DIR_NAME}" ]]; then
             BASEURL="/${DEPLOY_PATH}/${DIR_NAME}"
@@ -187,21 +180,18 @@ jobs:
           else
             BASEURL=""
           fi
-          
           # Set Jekyll output source path
           if [[ -z "${BASEURL}" ]]; then
             SITE_SOURCE="_site"
           else
             SITE_SOURCE="_site${BASEURL}"
           fi
-          
           # Set staging target path
           if [[ -n "${DIR_NAME}" ]]; then
             STAGING_TARGET="_build_staging/${DIR_NAME}"
           else
             STAGING_TARGET="_build_staging"
           fi
-          
           if [[ -n "${{ needs.pre-check.outputs.deploy_configs }}" && -n "${CONFIG_GROUP}" ]]; then
             FULL_CONFIGS="${{ needs.pre-check.outputs.deploy_configs }},_configs/${CONFIG_GROUP}"
           elif [[ -n "${CONFIG_GROUP}" ]]; then
@@ -209,17 +199,68 @@ jobs:
           else
             FULL_CONFIGS="${{ needs.pre-check.outputs.deploy_configs }}"
           fi
-          
           ${{ inputs.build-command }} --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true
-          
           # Create target directory if needed
           if [[ "${STAGING_TARGET}" != "_build_staging" ]]; then
             mkdir -p "${STAGING_TARGET}"
           fi
-          
           # Copy files to staging
           cp -r "${SITE_SOURCE}"/* "${STAGING_TARGET}/"
         done
+
+    - name: Checkout and sync media repository
+      if: needs.pre-check.outputs.media_repo != ''
+      run: |
+        MEDIA_REPO="${{ needs.pre-check.outputs.media_repo }}"
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        echo "📦 Checking out media repository: ${MEDIA_REPO} on branch ${TARGET_BRANCH}"
+        echo "🔑 Using token: ${{ secrets.ORG_DEPLOY_TOKEN != '' && '[REDACTED]' || '[EMPTY]' }}"
+
+    - name: Checkout media repository
+      if: needs.pre-check.outputs.media_repo != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ needs.pre-check.outputs.media_repo }}
+        ref: ${{ needs.pre-check.outputs.target_branch }}
+        token: ${{ secrets.ORG_DEPLOY_TOKEN }}
+        path: _media_repo
+        fetch-depth: 1
+
+    - name: Fallback to default branch for media repo
+      if: failure() && needs.pre-check.outputs.media_repo != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ needs.pre-check.outputs.media_repo }}
+        token: ${{ secrets.ORG_DEPLOY_TOKEN }}
+        path: _media_repo
+        fetch-depth: 1
+
+    - name: Sync media folders to staging area
+      if: needs.pre-check.outputs.media_repo != ''
+      run: |
+        MEDIA_REPO="${{ needs.pre-check.outputs.media_repo }}"
+        TARGET_BRANCH="${{ needs.pre-check.outputs.target_branch }}"
+        # Sync only root-level folders (not files) to the staging area
+        # Exclude folders starting with '_' or '.'
+        echo "🔄 Syncing media folders to staging area..."
+        for item in _media_repo/*/; do
+          if [ -d "$item" ]; then
+            folder_name=$(basename "$item")
+            # Skip folders starting with '_' or '.'
+            if [[ ! "$folder_name" =~ ^[_\.].*$ ]]; then
+              echo "  Syncing folder: $folder_name"
+              # Create destination folder if it doesn't exist
+              mkdir -p "_build_staging/$folder_name"
+              # Copy recursively without deleting existing files
+              cp -r "$item"* "_build_staging/$folder_name/"
+            else
+              echo "  Skipping folder: $folder_name (starts with '_' or '.')"
+            fi
+          fi
+        done
+        # Clean up the temporary media repo
+        rm -rf _media_repo
+        echo "✅ Media sync completed"
 
     - name: Load deployment configuration
       id: load_deploy_config
