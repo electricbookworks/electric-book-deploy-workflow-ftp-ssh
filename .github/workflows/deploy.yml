@@ -39,6 +39,9 @@ jobs:
       builds_json: ${{ steps.check_config.outputs.builds_json }}
       media_repo: ${{ steps.check_config.outputs.media_repo }}
       media_dirs: ${{ steps.check_config.outputs.media_dirs }}
+      media_global_repo: ${{ steps.check_config.outputs.media_global_repo }}
+      media_global_destination: ${{ steps.check_config.outputs.media_global_destination }}
+      media_global_dirs: ${{ steps.check_config.outputs.media_global_dirs }}
       should_deploy: ${{ steps.check_branch.outputs.should_deploy }}
       target_branch: ${{ steps.check_branch.outputs.target_branch }}
 
@@ -86,6 +89,11 @@ jobs:
           # Extract media config
           echo "media_repo=$(jq -r '."ftp-ssh".media.repo // ""' "$CONFIG_FILE")" >> $GITHUB_OUTPUT
           echo "media_dirs=$(jq -r '."ftp-ssh".media.dirs // [] | join(",")' "$CONFIG_FILE")" >> $GITHUB_OUTPUT
+          
+          # Extract media-global config
+          echo "media_global_repo=$(jq -r '."ftp-ssh"."media-global".repo // ""' "$CONFIG_FILE")" >> $GITHUB_OUTPUT
+          echo "media_global_destination=$(jq -r '."ftp-ssh"."media-global".destination // ""' "$CONFIG_FILE")" >> $GITHUB_OUTPUT
+          echo "media_global_dirs=$(jq -r '."ftp-ssh"."media-global".dirs // [] | join(",")' "$CONFIG_FILE")" >> $GITHUB_OUTPUT
 
       - name: Check branch
         id: check_branch
@@ -280,6 +288,81 @@ jobs:
           done
 
           rm -rf _media_repo
+      
+      - name: Setup global media repository
+        if: needs.pre-check.outputs.media_global_repo != ''
+        id: setup_global_media
+        run: |
+          MEDIA_GLOBAL_REPO="${{ needs.pre-check.outputs.media_global_repo }}"
+          TARGET_BRANCH="${{ env.TARGET_BRANCH }}"
+          
+          echo "🔍 Checking global media repository: $MEDIA_GLOBAL_REPO"
+          echo "🌿 Target branch: $TARGET_BRANCH"
+          
+          # Check if the target branch exists in the global media repository
+          if git ls-remote --heads https://${{ secrets.ORG_DEPLOY_TOKEN }}@github.com/$MEDIA_GLOBAL_REPO.git $TARGET_BRANCH | grep -q $TARGET_BRANCH; then
+            echo "✅ Branch '$TARGET_BRANCH' exists in global media repository"
+            echo "checkout_ref=$TARGET_BRANCH" >> $GITHUB_OUTPUT
+            echo "checkout_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Branch '$TARGET_BRANCH' not found in global media repository"
+            echo "📋 Will use default branch instead"
+            echo "checkout_ref=" >> $GITHUB_OUTPUT
+            echo "checkout_success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout global media repository
+        if: needs.pre-check.outputs.media_global_repo != '' && steps.setup_global_media.outputs.checkout_success == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.pre-check.outputs.media_global_repo }}
+          ref: ${{ steps.setup_global_media.outputs.checkout_ref }}
+          token: ${{ secrets.ORG_DEPLOY_TOKEN }}
+          path: _media_global_repo
+          fetch-depth: 1
+
+      - name: Checkout global media repository (default branch)
+        if: needs.pre-check.outputs.media_global_repo != '' && steps.setup_global_media.outputs.checkout_success == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.pre-check.outputs.media_global_repo }}
+          token: ${{ secrets.ORG_DEPLOY_TOKEN }}
+          path: _media_global_repo
+          fetch-depth: 1
+
+      - name: Sync global media
+        if: needs.pre-check.outputs.media_global_repo != ''
+        run: |
+          MEDIA_GLOBAL_DIRS_RAW="${{ needs.pre-check.outputs.media_global_dirs }}"
+          MEDIA_GLOBAL_DESTINATION="${{ needs.pre-check.outputs.media_global_destination }}"
+          
+          if [[ -d "_media_global_repo" && -n "$MEDIA_GLOBAL_DIRS_RAW" && -n "$MEDIA_GLOBAL_DESTINATION" ]]; then
+            echo "🔄 Syncing global media to: $MEDIA_GLOBAL_DESTINATION"
+            
+            # Create the destination directory in _build_staging
+            DEST_PATH="_build_staging/$MEDIA_GLOBAL_DESTINATION"
+            mkdir -p "$DEST_PATH"
+            
+            IFS=',' read -ra MEDIA_GLOBAL_DIRS <<< "$MEDIA_GLOBAL_DIRS_RAW"
+            for media_dir in "${MEDIA_GLOBAL_DIRS[@]}"; do
+              media_dir=$(echo "$media_dir" | xargs)
+              if [[ -d "_media_global_repo/$media_dir" ]]; then
+                # Preserve the full directory structure in the destination
+                DEST_FULL_PATH="$DEST_PATH/$media_dir"
+                
+                # Create parent directories if they don't exist
+                mkdir -p "$(dirname "$DEST_FULL_PATH")"
+                
+                # Copy the directory preserving the full path structure
+                cp -r "_media_global_repo/$media_dir" "$DEST_FULL_PATH"
+                echo "      Synced: $media_dir -> $DEST_FULL_PATH"
+              else
+                echo "      ⚠️ Directory not found: $media_dir"
+              fi
+            done
+          fi
+          
+          rm -rf _media_global_repo
       
       - name: Deploy via FTP
         if: steps.build_project.outputs.deploy_type == 'ftp'

@@ -67,6 +67,7 @@ Create `.github/workflows/deploy.config.json`:
         "dir": "test/teacher"
       }
     ],
+    "path-comment": "The contents of the paths defined below will be completely replaced on the server by the builds output. So make sure the path is dedicated to this deployment.",
     "live":{
       "type": "ftp",
       "web-root": "public_html",
@@ -81,6 +82,15 @@ Create `.github/workflows/deploy.config.json`:
       "repo": "owner-name/repo-name",
       "dirs": [
         "assets/images/web"
+      ]
+    },
+    "media-global": {
+      "repo": "electricbookworks/allsa-practical-allergy-media",
+      "destination": "textbook-of-practical-allergy/media",
+      "dirs": [
+        "5e/images/web",
+        "assets/images/web",
+        "downloads"
       ]
     }
   }

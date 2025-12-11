@@ -32,6 +32,15 @@
       "dirs": [
         "assets/images/web"
       ]
+    },
+    "media-global": {
+      "repo": "electricbookworks/allsa-practical-allergy-media",
+      "destination": "textbook-of-practical-allergy/media",
+      "dirs": [
+        "5e/images/web",
+        "assets/images/web",
+        "downloads"
+      ]
     }
   }
 }
