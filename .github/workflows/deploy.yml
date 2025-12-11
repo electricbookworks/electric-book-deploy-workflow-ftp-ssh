@@ -251,7 +251,8 @@ jobs:
             mkdir -p "$STAGING_TARGET"
             
             if [[ -d "$SITE_SOURCE" ]]; then
-              cp -r "$SITE_SOURCE"/* "$STAGING_TARGET/"
+              # Copy all files including hidden files like .htaccess
+              cp -r "$SITE_SOURCE"/. "$STAGING_TARGET/"
               rm -rf "$SITE_SOURCE"
             else 
               echo "   ❌ Error: Build output directory $SITE_SOURCE not found!"
