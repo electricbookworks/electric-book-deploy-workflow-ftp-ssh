@@ -118,7 +118,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for Node.js dependencies
+        id: check_node
+        run: |
+          if [ -f "package-lock.json" ]; then
+            echo "has_package_lock=true" >> $GITHUB_OUTPUT
+            echo "📦 Found package-lock.json, will setup Node.js"
+          else
+            echo "has_package_lock=false" >> $GITHUB_OUTPUT
+            echo "📋 No package-lock.json found, skipping Node.js setup"
+          fi
+
       - name: Setup Node.js
+        if: steps.check_node.outputs.has_package_lock == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
@@ -131,6 +143,7 @@ jobs:
           bundler-cache: true
 
       - name: Install dependencies
+        if: steps.check_node.outputs.has_package_lock == 'true'
         run: ${{ inputs.setup-command }}
 
       - name: Setup media repository
