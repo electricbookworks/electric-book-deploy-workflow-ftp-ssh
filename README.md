@@ -56,15 +56,15 @@ Create `.github/workflows/deploy.config.json`:
     "builds": [
       {
         "configs": [],
-        "dir": "electric-book"
+        "dir": ""
       },
       {
-        "configs": ["_config.student.yml"],
-        "dir": "test/student"
+        "configs": ["_config.audience-1.yml"],
+        "dir": "audience/1"
       },
       {
-        "configs": ["_config.teacher.yml"],
-        "dir": "test/teacher"
+        "configs": ["_config.audience-2.yml"],
+        "dir": "audience/2"
       }
     ],
     "path-comment": "The contents of the paths defined below will be completely replaced on the server by the builds output. So make sure the path is dedicated to this deployment.",
@@ -74,6 +74,8 @@ Create `.github/workflows/deploy.config.json`:
       "path": ""
     },
     "staging": {
+      "configs-comment": "Branch-specific configs property overrides any top-level configs.",
+      "configs": ["_config.staging.yml"],
       "type": "ssh",
       "web-root": "public_html",
       "path": ""
@@ -85,10 +87,9 @@ Create `.github/workflows/deploy.config.json`:
       ]
     },
     "media-global": {
-      "repo": "electricbookworks/allsa-practical-allergy-media",
-      "destination": "textbook-of-practical-allergy/media",
+      "repo": "owner-name/repo-name",
+      "destination": "media",
       "dirs": [
-        "5e/images/web",
         "assets/images/web",
         "downloads"
       ]
