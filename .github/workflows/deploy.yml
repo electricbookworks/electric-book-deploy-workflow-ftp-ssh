@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       skip_book_server: ${{ steps.check_config.outputs.skip_book_server }}
-      deploy_configs: ${{ steps.check_config.outputs.deploy_configs }}
+      deploy_configs: ${{ steps.check_branch.outputs.deploy_configs }}
       # We output the whole builds JSON object to avoid string splitting issues later
       builds_json: ${{ steps.check_config.outputs.builds_json }}
       media_repo: ${{ steps.check_config.outputs.media_repo }}
@@ -99,10 +99,21 @@ jobs:
         id: check_branch
         if: steps.check_config.outputs.skip_book_server == 'false'
         run: |
+          CONFIG_FILE="${{ inputs.config-file }}"
           CURRENT="${{ github.ref_name }}"
           if [[ "$CURRENT" == "live" || "$CURRENT" == "staging" ]]; then
             echo "should_deploy=true" >> $GITHUB_OUTPUT
             echo "target_branch=$CURRENT" >> $GITHUB_OUTPUT
+            
+            # Check for branch-specific configs and override top-level configs if they exist
+            BRANCH_CONFIGS=$(jq -r ".\"ftp-ssh\".\"$CURRENT\".configs // empty | join(\",\")" "$CONFIG_FILE")
+            if [[ -n "$BRANCH_CONFIGS" ]]; then
+              echo "📝 Using branch-specific configs for $CURRENT: $BRANCH_CONFIGS"
+              echo "deploy_configs=$BRANCH_CONFIGS" >> $GITHUB_OUTPUT
+            else
+              echo "📝 Using top-level configs for $CURRENT: ${{ steps.check_config.outputs.deploy_configs }}"
+              echo "deploy_configs=${{ steps.check_config.outputs.deploy_configs }}" >> $GITHUB_OUTPUT
+            fi
           else
             echo "should_deploy=false" >> $GITHUB_OUTPUT
             echo "❌ Branch '$CURRENT' is not allowed. Skipping."
