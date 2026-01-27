@@ -379,6 +379,11 @@ jobs:
           # Check if any builds have specific directories
           HAS_DIRS=$(echo "$BUILDS_JSON" | jq -r 'map(select(.dir != "")) | length > 0')
           
+          # Check if we have a single build with empty dir but content in a subdirectory
+          DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".\"$TARGET_BRANCH\".path" "$CONFIG_FILE")
+          SINGLE_BUILD_COUNT=$(echo "$BUILDS_JSON" | jq -r 'length')
+          SINGLE_BUILD_EMPTY_DIR=$(echo "$BUILDS_JSON" | jq -r '.[0].dir == ""')
+          
           if [[ "$HAS_DIRS" == "true" ]]; then
             echo "📁 Deploying per-directory to avoid root-level deletions"
             
@@ -410,6 +415,16 @@ jobs:
                 quit
               "
             fi
+          elif [[ "$SINGLE_BUILD_COUNT" == "1" && "$SINGLE_BUILD_EMPTY_DIR" == "true" && -n "$DEPLOY_PATH" && -d "${LOCAL_DIR}${DEPLOY_PATH}" ]]; then
+            echo "📦 Deploying single build with path-based content"
+            # Content is in _build_staging/path/, sync it directly to remote directory
+            lftp -c "
+              set ssl:verify-certificate yes;
+              set ftp:sync-mode false;
+              open -u '$DEPLOY_USER','$DEPLOY_PASS' -p '$DEPLOY_PORT' '$DEPLOY_HOST';
+              mirror -Rv --delete --exclude-glob '.git*' --exclude-glob 'node_modules' '${LOCAL_DIR}${DEPLOY_PATH}/' '$REMOTE_DIR';
+              quit
+            "
           else
             echo "📦 Deploying entire directory (no specific build dirs)"
             lftp -c "
@@ -439,6 +454,11 @@ jobs:
           # Check if any builds have specific directories
           HAS_DIRS=$(echo "$BUILDS_JSON" | jq -r 'map(select(.dir != "")) | length > 0')
           
+          # Check if we have a single build with empty dir but content in a subdirectory
+          DEPLOY_PATH=$(jq -r ".\"ftp-ssh\".\"$TARGET_BRANCH\".path" "$CONFIG_FILE")
+          SINGLE_BUILD_COUNT=$(echo "$BUILDS_JSON" | jq -r 'length')
+          SINGLE_BUILD_EMPTY_DIR=$(echo "$BUILDS_JSON" | jq -r '.[0].dir == ""')
+          
           if [[ "$HAS_DIRS" == "true" ]]; then
             echo "📁 Deploying per-directory to avoid root-level deletions"
             
@@ -464,6 +484,13 @@ jobs:
                 "${LOCAL_DIR}" \
                 "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${REMOTE_DIR}/"
             fi
+          elif [[ "$SINGLE_BUILD_COUNT" == "1" && "$SINGLE_BUILD_EMPTY_DIR" == "true" && -n "$DEPLOY_PATH" && -d "${LOCAL_DIR}${DEPLOY_PATH}" ]]; then
+            echo "📦 Deploying single build with path-based content"
+            # Content is in _build_staging/path/, sync it directly to remote directory
+            rsync -avzr --delete \
+              -e "ssh -i ~/.ssh/deploy_key -p ${{ env.DEPLOY_PORT }} -o StrictHostKeyChecking=no" \
+              "${LOCAL_DIR}${DEPLOY_PATH}/" \
+              "${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${REMOTE_DIR}/"
           else
             echo "📦 Deploying entire directory (no specific build dirs)"
             rsync -avzr --delete \
