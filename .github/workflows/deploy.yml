@@ -47,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout config file
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: ${{ inputs.config-file }}
           fetch-depth: 1
@@ -133,7 +133,7 @@ jobs:
     
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -189,7 +189,7 @@ jobs:
 
       - name: Checkout media repository
         if: needs.pre-check.outputs.media_repo != '' && steps.setup_media.outputs.checkout_success == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.pre-check.outputs.media_repo }}
           ref: ${{ steps.setup_media.outputs.checkout_ref }}
@@ -199,7 +199,7 @@ jobs:
 
       - name: Checkout media repository (default branch)
         if: needs.pre-check.outputs.media_repo != '' && steps.setup_media.outputs.checkout_success == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.pre-check.outputs.media_repo }}
           token: ${{ secrets.ORG_DEPLOY_TOKEN }}
@@ -324,7 +324,7 @@ jobs:
 
       - name: Checkout global media repository
         if: needs.pre-check.outputs.media_global_repo != '' && steps.setup_global_media.outputs.checkout_success == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.pre-check.outputs.media_global_repo }}
           ref: ${{ steps.setup_global_media.outputs.checkout_ref }}
@@ -334,7 +334,7 @@ jobs:
 
       - name: Checkout global media repository (default branch)
         if: needs.pre-check.outputs.media_global_repo != '' && steps.setup_global_media.outputs.checkout_success == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.pre-check.outputs.media_global_repo }}
           token: ${{ secrets.ORG_DEPLOY_TOKEN }}
