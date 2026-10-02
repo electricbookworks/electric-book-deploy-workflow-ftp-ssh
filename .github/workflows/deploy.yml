@@ -26,7 +26,7 @@ on:
       build-command:
         description: 'Command to run for building the project'
         required: false
-        default: 'npm run eb -- output --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true'
+        default: 'npm run eb -- output --baseurl="${BASEURL}" --configs="${FULL_CONFIGS}" --dontserve=true --deploy=true --deploytype="${TARGET_BRANCH}"'
         type: string
 
 jobs:
